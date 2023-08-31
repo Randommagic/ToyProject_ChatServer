@@ -30,10 +30,10 @@ typedef struct {
     int refCnt;
 } PER_IO_DATA, *LPPER_IO_DATA;
 
-DWORD WINAPI EchoThreadMain(LPVOID);
+unsigned int WINAPI EchoThreadMain(LPVOID);
 
 void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
-void ErrorHandling(char *);
+void ErrorHandling(const char *);
 
 LPPER_HANDLE_DATA clntHandles[MAX_CLNT];
 
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
 }
 
 // Completion Port Object에 할당된 쓰레드
-DWORD WINAPI EchoThreadMain(LPVOID pComport) {
+unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
     HANDLE hComport = (HANDLE)pComport;
     SOCKET sock;
@@ -136,7 +136,7 @@ DWORD WINAPI EchoThreadMain(LPVOID pComport) {
 
     while (1) {
         // IO가 완료되고, 이에 대한 정보다 등록되었을때 반환.
-        BOOL CPstatus = GetQueuedCompletionStatus(hComport, &bytesTrans, (LPDWORD)&handleInfo, (LPOVERLAPPED *)&ioInfo, INFINITE);
+        BOOL CPstatus = GetQueuedCompletionStatus(hComport, &bytesTrans, (ULONG_PTR *)&handleInfo, (LPOVERLAPPED *)&ioInfo, INFINITE);
         if (CPstatus == FALSE) {
             if (WSAGetLastError() == ERROR_NETNAME_DELETED) { // Client Hard Close
                 ClientDisconnected(sock, handleInfo, ioInfo);
@@ -217,7 +217,7 @@ void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA
     free(ioInfo);
 }
 
-void ErrorHandling(char *msg) {
+void ErrorHandling(const char *msg) {
     fputs(msg, stderr);
     fputc('\n', stderr);
     exit(1);
