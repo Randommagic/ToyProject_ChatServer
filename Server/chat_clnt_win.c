@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         ErrorHandling("WSAStartup() error!");
 
-    sprintf(name, "[%s]", argv[3]);
+    sprintf(name, argv[3]);
     hSock = socket(PF_INET, SOCK_STREAM, 0);
 
     memset(&servAdr, 0, sizeof(servAdr));
@@ -45,11 +45,15 @@ int main(int argc, char *argv[]) {
     if (connect(hSock, (SOCKADDR *)&servAdr, sizeof(servAdr)) == SOCKET_ERROR)
         ErrorHandling("connect() error");
 
+    char nameSendMsg[NAME_SIZE + 1];
+    sprintf(nameSendMsg, "1%s", name);
+    send(hSock, nameSendMsg, NAME_SIZE + 1, 0);
+
     hSndThread = (HANDLE)_beginthreadex(NULL, 0, SendMsg, (void *)&hSock, 0, NULL);
     hRcvThread = (HANDLE)_beginthreadex(NULL, 0, RecvMsg, (void *)&hSock, 0, NULL);
 
     WaitForSingleObject(hSndThread, INFINITE);
-    WaitForSingleObject(hSndThread, INFINITE);
+    WaitForSingleObject(hRcvThread, INFINITE);
 
     closesocket(hSock);
     WSACleanup();
@@ -59,7 +63,7 @@ int main(int argc, char *argv[]) {
 unsigned WINAPI SendMsg(void *arg) // send thread main
 {
     SOCKET hSock = *((SOCKET *)arg);
-    char nameMsg[NAME_SIZE + BUF_SIZE];
+    char sendMsg[BUF_SIZE];
 
     while (1) {
         fgets(msg, BUF_SIZE, stdin);
@@ -67,23 +71,23 @@ unsigned WINAPI SendMsg(void *arg) // send thread main
             closesocket(hSock); // 클라이언트 소켓 종료
             exit(EXIT_SUCCESS);
         }
-        sprintf(nameMsg, "%s %s", name, msg);
-        send(hSock, nameMsg, strlen(nameMsg), 0);
+        sprintf(sendMsg, "2%s", msg);
+        send(hSock, sendMsg, strlen(sendMsg), 0);
     }
 }
 
 unsigned WINAPI RecvMsg(void *arg) // read thread main
 {
     SOCKET hSock = *((SOCKET *)arg);
-    char nameMsg[NAME_SIZE + BUF_SIZE];
+    char recvMsg[NAME_SIZE + BUF_SIZE + 1];
     int strLen;
 
     while (1) {
-        strLen = recv(hSock, nameMsg, NAME_SIZE + BUF_SIZE - 1, 0);
+        strLen = recv(hSock, recvMsg, NAME_SIZE + BUF_SIZE - 1, 0);
         if (strLen == -1)
             return -1;
-        nameMsg[strLen] = '\0';
-        fputs(nameMsg, stdout);
+        recvMsg[strLen] = '\0';
+        fputs(recvMsg + 1, stdout);
     }
 }
 
