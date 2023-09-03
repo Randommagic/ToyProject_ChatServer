@@ -14,9 +14,15 @@
 
 #define MAX_CLNT 256
 #define BUF_SIZE 100
+#define MESSAGE_SIZE 124
 #define NAME_SIZE 20
 #define READ 3
 #define WRITE 5
+
+typedef struct {
+    int messageType;
+    char data[BUF_SIZE];
+} MESSAGE_DATA;
 
 typedef struct {
     SOCKET hClntSock;
@@ -27,18 +33,20 @@ typedef struct {
 typedef struct {
     OVERLAPPED overlapped;
     WSABUF wsaBuf;
-    char buffer[BUF_SIZE];
+    char buffer[sizeof(MESSAGE_DATA)];
     int rwMode;
     int refCnt;
 } PER_IO_DATA, *LPPER_IO_DATA;
 
 unsigned int WINAPI EchoThreadMain(LPVOID);
 
-void sendMessageToAll(char *receivedMessage, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
+void sendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
 void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
 void ErrorHandling(const char *);
 
-// LPPER_HANDLE_DATA clntHandles[MAX_CLNT];
+void SerializeMessage(MESSAGE_DATA *message, char *buffer);
+void DeserializeMessage(char *buffer, MESSAGE_DATA *message);
+
 std::map<SOCKET, LPPER_HANDLE_DATA> clntHandles;
 
 int clntCnt = 0;
@@ -116,6 +124,7 @@ int main(int argc, char *argv[]) {
         ioInfo->wsaBuf.buf = ioInfo->buffer;
         ioInfo->rwMode = READ;
         ioInfo->refCnt = 0;
+        printf("Created io struct address : %p\n", ioInfo);
 
         // 클라이언트 목록에 새로 접속한 클라이언트 추가
         WaitForSingleObject(&hMutex, INFINITE);
@@ -129,6 +138,9 @@ int main(int argc, char *argv[]) {
 
         WSARecv(handleInfo->hClntSock, &(ioInfo->wsaBuf), 1, &recvBytes, &flags, &(ioInfo->overlapped), NULL);
     }
+
+    CloseHandle(hMutex);
+    closesocket(hServSock);
 }
 
 // Completion Port Object에 할당된 쓰레드
@@ -142,51 +154,45 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
     DWORD flags = 0;
 
     while (1) {
-        // IO가 완료되고, 이에 대한 정보다 등록되었을때 반환.
+        // IO가 완료되고, 이에 대한 정보가 등록되었을때 반환.
         BOOL CPstatus = GetQueuedCompletionStatus(hComport, &bytesTrans, (ULONG_PTR *)&handleInfo, (LPOVERLAPPED *)&ioInfo, INFINITE);
         sock = handleInfo->hClntSock;
 
-        // IODEBUG
-        printf("---------------\n");
-        printf("ioInfo Buffer : %s\n", ioInfo->buffer);
-        // printf("ioInfo refCnt : %d\n", ioInfo->refCnt);
-        printf("ioInfo rwMode : %d\n", ioInfo->rwMode);
-
         if (CPstatus == FALSE) {
-            if (WSAGetLastError() == ERROR_NETNAME_DELETED) { // Client Hard Close
+            DWORD WSAerror = WSAGetLastError();
+            if (WSAerror == ERROR_NETNAME_DELETED) { // Client Hard Close
                 ClientDisconnected(sock, handleInfo, ioInfo);
+                continue;
+            } else if (WSAerror == ERROR_IO_PENDING) {
+                printf("ERROR_IO_PENDING called!!\n");
                 continue;
             } else
                 ErrorHandling("GetQueuedCompletionStatus error");
         }
 
         if (ioInfo->rwMode == READ) {
-
             // EOF - Client Disconnect - Client Soft Close
             if (bytesTrans == 0) {
-                // 클라이언트 리스트에서 접속종료한 클라이언트 삭제
                 ClientDisconnected(sock, handleInfo, ioInfo);
                 continue;
             }
 
-            char receivedMessage[BUF_SIZE];
-            strncpy(receivedMessage, ioInfo->wsaBuf.buf, bytesTrans);
-            receivedMessage[bytesTrans] = 0;
-            char op = (char)receivedMessage[0];
-            if (op == '1') {
-                printf("Connected client name : %s", receivedMessage + 1);
-                strncpy(handleInfo->clntName, receivedMessage + 1, bytesTrans - 1);
-            }
-            //     strcpy(handleInfo->clntName, receivedMessage + 1);
-            //     printf("Nickname init : %s\n", handleInfo->clntName);
+            char receivedBuffer[sizeof(MESSAGE_DATA)];
+            memcpy(receivedBuffer, ioInfo->wsaBuf.buf, sizeof(MESSAGE_DATA));
 
-            //     // 연결한 모든 클라이언트에게 데이터 전송.
-            //     memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-            //     sprintf(ioInfo->buffer, "Client Connected : %s\n", handleInfo->clntName);
-            //     ioInfo->wsaBuf.len = strlen(ioInfo->buffer);
-            //     ioInfo->rwMode = WRITE;
-            //     // test
+            MESSAGE_DATA receivedMessage;
+            DeserializeMessage(receivedBuffer, &receivedMessage);
+
+            printf("Received io struct address : %p\n", ioInfo);
+            // printf("Received type : %d\n", receivedMessage.messageType);
+            printf("Received Message : %s\n", receivedMessage.data);
             sendMessageToAll(receivedMessage, sock, handleInfo, ioInfo);
+            // test
+            // if (receivedMessage.messageType == 1) {
+            //     sendMessageToAll(receivedMessage, sock, handleInfo, ioInfo);
+            // } else if (receivedMessage.messageType == 2) {
+            //     sendMessageToAll(receivedMessage, sock, handleInfo, ioInfo);
+            // }
         } else {
             WaitForSingleObject(&hMutex, INFINITE);
             --(ioInfo->refCnt);
@@ -194,6 +200,8 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
             if (ioInfo->refCnt <= 0) {
                 printf("Message sent to %d clients! \n", clntCnt);
+                printf("Deleted io struct address : %p\n", ioInfo);
+
                 free(ioInfo);
             }
         }
@@ -201,16 +209,22 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
     return 0;
 }
 
-void sendMessageToAll(char *receivedMessage, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
+void sendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
     // 연결한 모든 클라이언트에게 데이터 전송.
+
     DWORD flags = 0;
-    char sendMessage[NAME_SIZE + BUF_SIZE + 1];
-    sprintf(sendMessage, "9[%s] : %s", handleInfo->clntName, receivedMessage + 1);
+    sendMessageData.messageType = 9;
+
+    char sendMessageBuffer[sizeof(MESSAGE_DATA)];
+    SerializeMessage(&sendMessageData, sendMessageBuffer);
 
     memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    ioInfo->wsaBuf.len = strlen(sendMessage);
+    // 이건지 밑에껀지 모르겠다.
+    // ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
+    ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+
     ioInfo->rwMode = WRITE;
-    strcpy(ioInfo->buffer, sendMessage);
+    memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
@@ -225,20 +239,15 @@ void sendMessageToAll(char *receivedMessage, SOCKET sock, LPPER_HANDLE_DATA hand
     ioInfo->wsaBuf.len = BUF_SIZE;
     ioInfo->wsaBuf.buf = ioInfo->buffer;
     ioInfo->rwMode = READ;
+    ioInfo->refCnt = 0;
+
+    printf("Created io struct address : %p\n", ioInfo);
+
     WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
 }
 
 void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
-
     WaitForSingleObject(&hMutex, INFINITE);
-    // for (int i = 0; i < clntCnt; i++) {
-    //     if (clntHandles[i]->hClntSock == sock) {
-    //         printf("Client Disconnected from %s \n", inet_ntoa(clntHandles[i]->clntAdr.sin_addr));
-    //         while (i++ < clntCnt - 1)
-    //             clntHandles[i] = clntHandles[i + 1];
-    //         break;
-    //     }
-    // }
     clntHandles.erase(sock);
     clntCnt--;
     ReleaseMutex(&hMutex);
@@ -246,6 +255,10 @@ void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA
     free(handleInfo);
     free(ioInfo);
 }
+
+void SerializeMessage(MESSAGE_DATA *message, char *buffer) { memcpy(buffer, message, sizeof(MESSAGE_DATA)); }
+
+void DeserializeMessage(char *buffer, MESSAGE_DATA *message) { memcpy(message, buffer, sizeof(MESSAGE_DATA)); }
 
 void ErrorHandling(const char *msg) {
     fputs(msg, stderr);
