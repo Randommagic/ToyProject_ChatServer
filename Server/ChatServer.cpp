@@ -1,6 +1,5 @@
 /*
-    IOCPChatServ_win.c
-    IOCP 를 사용한 채팅서버
+    현재 문제 : soft close시에는 write에 대한 응답을 못 받는 듯 하다.
 
 */
 #include <map>
@@ -40,6 +39,7 @@ typedef struct {
 unsigned int WINAPI EchoThreadMain(LPVOID);
 
 void ClientConnected(MESSAGE_DATA &sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
+void ClientChangeName(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 
 void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
@@ -185,13 +185,14 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
             MESSAGE_DATA receivedMessage;
             DeserializeMessage(receivedBuffer, &receivedMessage);
-
+            printf("type : %d\n", receivedMessage.messageType);
             if (receivedMessage.messageType == 1) {
                 ClientConnected(receivedMessage, sock, handleInfo);
-            } else {
+            } else if (receivedMessage.messageType == 2) {
                 SendMessageToAll(receivedMessage, sock, handleInfo);
+            } else if ((receivedMessage.messageType == 3)) {
+                ClientChangeName(receivedMessage, sock, handleInfo);
             }
-
         } else {
             printf("Message sent to %d clients! \n", clntCnt);
             // printf("Deleted io struct address : %p\n", ioInfo);
@@ -231,8 +232,6 @@ void ClientConnected(MESSAGE_DATA &MessageData, SOCKET sock, LPPER_HANDLE_DATA h
     ioInfo->wsaBuf.buf = ioInfo->buffer;
     ioInfo->rwMode = READ;
 
-    // printf("Created io struct address : %p\n", ioInfo);
-
     WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
 }
 
@@ -270,6 +269,39 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     ioInfo->rwMode = READ;
 
     // printf("Created io struct address : %p\n", ioInfo);
+
+    WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
+}
+
+// 문제 있음.
+void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
+
+    DWORD flags = 0;
+    LPPER_IO_DATA ioInfo;
+
+    MessageData.messageType = 3;
+    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
+    char sendMessageBuffer[sizeof(MESSAGE_DATA)];
+    SerializeMessage(&MessageData, sendMessageBuffer);
+
+    WaitForSingleObject(&hMutex, INFINITE);
+    for (auto &clntHandle : clntHandles) {
+        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        ioInfo->wsaBuf.buf = ioInfo->buffer;
+        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        ioInfo->rwMode = WRITE;
+        WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+    }
+    ReleaseMutex(&hMutex);
+
+    // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
+    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
+    ioInfo->wsaBuf.buf = ioInfo->buffer;
+    ioInfo->rwMode = READ;
 
     WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
 }

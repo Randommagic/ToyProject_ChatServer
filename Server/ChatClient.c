@@ -76,16 +76,31 @@ unsigned WINAPI SendMsg(void *arg) // send thread main
 {
     SOCKET hSock = *((SOCKET *)arg);
     MESSAGE_DATA sendMessageData;
-    sendMessageData.messageType = 2;
 
+    char inputBuffer[BUF_SIZE];
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
 
     while (1) {
-        fgets(sendMessageData.data, BUF_SIZE, stdin);
-        if (!strcmp(sendMessageData.data, "q\n") || !strcmp(sendMessageData.data, "Q\n")) {
+        fgets(inputBuffer, BUF_SIZE, stdin);
+
+        if (!strcmp(inputBuffer, "q\n") || !strcmp(inputBuffer, "Q\n")) {
             shutdown(hSock, SD_SEND);
             return 0;
         }
+
+        if (!strncmp(inputBuffer, "/r", 2)) {
+            if (strlen(inputBuffer) - 3 >= NAME_SIZE) {
+                printf("이름이 너무 기러용\n");
+                continue;
+            }
+            inputBuffer[strlen(inputBuffer) - 1] = '\0';
+            memcpy(sendMessageData.data, inputBuffer + 3, NAME_SIZE);
+            sendMessageData.messageType = 3;
+        } else {
+            sendMessageData.messageType = 2;
+            memcpy(sendMessageData.data, inputBuffer, BUF_SIZE);
+        }
+
         SerializeMessage(&sendMessageData, sendMessageBuffer);
         send(hSock, sendMessageBuffer, sizeof(MESSAGE_DATA), 0);
     }
@@ -115,6 +130,8 @@ unsigned WINAPI RecvMsg(void *arg) // read thread main
             printf("%s 님이 접속하셨습니다.\n", recvMessageData.data);
         } else if (recvMessageData.messageType == 2) {
             fputs(recvMessageData.data, stdout);
+        } else if (recvMessageData.messageType == 3) { // 이름 변경
+            printf("%s 으로 이름을 변경하셨습니다.\n", recvMessageData.data);
         } else if (recvMessageData.messageType == 9) {
             printf("%s 님이 퇴장하셨습니다.\n", recvMessageData.data);
         }
