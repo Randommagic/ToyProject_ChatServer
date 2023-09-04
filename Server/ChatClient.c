@@ -1,3 +1,4 @@
+#include <Winsock2.h>
 #include <process.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,8 +83,8 @@ unsigned WINAPI SendMsg(void *arg) // send thread main
     while (1) {
         fgets(sendMessageData.data, BUF_SIZE, stdin);
         if (!strcmp(sendMessageData.data, "q\n") || !strcmp(sendMessageData.data, "Q\n")) {
-            closesocket(hSock); // ?Å¥?ùº?ù¥?ñ∏?ä∏ ?ÜåÏº? Ï¢ÖÎ£å
-            exit(EXIT_SUCCESS);
+            shutdown(hSock, SD_SEND);
+            return 0;
         }
         SerializeMessage(&sendMessageData, sendMessageBuffer);
         send(hSock, sendMessageBuffer, sizeof(MESSAGE_DATA), 0);
@@ -103,6 +104,11 @@ unsigned WINAPI RecvMsg(void *arg) // read thread main
         strLen = recv(hSock, recvMessageBuffer, sizeof(MESSAGE_DATA), 0);
         if (strLen == SOCKET_ERROR)
             return -1;
+        else if (strLen == 0) {
+            shutdown(hSock, SD_RECEIVE);
+            return 0;
+        }
+
         DeserializeMessage(recvMessageBuffer, &recvMessageData);
 
         if (recvMessageData.messageType == 1) {

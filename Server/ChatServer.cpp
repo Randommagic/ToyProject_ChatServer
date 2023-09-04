@@ -161,6 +161,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
         if (CPstatus == FALSE) {
             DWORD WSAerror = WSAGetLastError();
             if (WSAerror == ERROR_NETNAME_DELETED) { // Client Hard Close
+                printf("Client hard Close\n");
                 ClientDisconnected(handleInfo, ioInfo);
                 continue;
             } else if (WSAerror == ERROR_IO_PENDING) {
@@ -173,6 +174,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
         if (ioInfo->rwMode == READ) {
             // EOF - Client Disconnect - Client Soft Close
             if (bytesTrans == 0) {
+                printf("Client Soft Close\n");
                 ClientDisconnected(handleInfo, ioInfo);
                 continue;
             }
