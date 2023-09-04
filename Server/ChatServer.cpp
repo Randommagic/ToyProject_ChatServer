@@ -42,7 +42,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID);
 void ClientConnected(MESSAGE_DATA &sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 
-void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
+void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
 void ErrorHandling(const char *);
 
 void SerializeMessage(MESSAGE_DATA *message, char *buffer);
@@ -54,8 +54,8 @@ int clntCnt = 0;
 HANDLE hMutex;
 
 int main(int argc, char *argv[]) {
-    if (argc != 2)
-        exit(1);
+    // if (argc != 2)
+    //     exit(1);
 
     WSADATA wsaData;
     HANDLE hComPort;
@@ -87,7 +87,8 @@ int main(int argc, char *argv[]) {
     memset(&servAdr, 0, sizeof(servAdr));
     servAdr.sin_family = AF_INET;
     servAdr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servAdr.sin_port = htons(atoi(argv[1]));
+    // servAdr.sin_port = htons(atoi(argv[1]));
+    servAdr.sin_port = htons(atoi("9999"));
 
     if (bind(hServSock, (SOCKADDR *)&servAdr, sizeof(servAdr)) == SOCKET_ERROR) {
         printf("code : %d", WSAGetLastError());
@@ -160,7 +161,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
         if (CPstatus == FALSE) {
             DWORD WSAerror = WSAGetLastError();
             if (WSAerror == ERROR_NETNAME_DELETED) { // Client Hard Close
-                ClientDisconnected(sock, handleInfo, ioInfo);
+                ClientDisconnected(handleInfo, ioInfo);
                 continue;
             } else if (WSAerror == ERROR_IO_PENDING) {
                 printf("ERROR_IO_PENDING called!!\n");
@@ -172,7 +173,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
         if (ioInfo->rwMode == READ) {
             // EOF - Client Disconnect - Client Soft Close
             if (bytesTrans == 0) {
-                ClientDisconnected(sock, handleInfo, ioInfo);
+                ClientDisconnected(handleInfo, ioInfo);
                 continue;
             }
 
@@ -271,12 +272,35 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
 }
 
-void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
+void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
+
+    MESSAGE_DATA messageData;
+    DWORD flags = 0;
+    LPPER_IO_DATA newIoInfo;
+
+    messageData.messageType = 9;
+    memcpy(messageData.data, handleInfo->clntName, strlen(messageData.data));
+    char sendMessageBuffer[sizeof(MESSAGE_DATA)];
+    SerializeMessage(&messageData, sendMessageBuffer);
+
     WaitForSingleObject(&hMutex, INFINITE);
-    clntHandles.erase(sock);
+    for (auto &clntHandle : clntHandles) {
+        // 당연히 접속 끊은 사람은 제외하고 보내기
+        if (clntHandle.first == handleInfo->hClntSock)
+            continue;
+        newIoInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        memset(&(newIoInfo->overlapped), 0, sizeof(OVERLAPPED));
+        memcpy(newIoInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        newIoInfo->wsaBuf.buf = newIoInfo->buffer;
+        newIoInfo->wsaBuf.len = sizeof(newIoInfo->buffer);
+        newIoInfo->rwMode = WRITE;
+        WSASend(clntHandle.second->hClntSock, &(newIoInfo->wsaBuf), 1, NULL, 0, &(newIoInfo->overlapped), NULL);
+    }
+    clntHandles.erase(handleInfo->hClntSock);
     clntCnt--;
     ReleaseMutex(&hMutex);
-    closesocket(sock);
+
+    closesocket(handleInfo->hClntSock);
     free(handleInfo);
     free(ioInfo);
 }

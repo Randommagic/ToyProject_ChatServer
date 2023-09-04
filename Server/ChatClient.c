@@ -27,21 +27,23 @@ int main(int argc, char *argv[]) {
     SOCKADDR_IN servAdr;
     HANDLE hSndThread, hRcvThread;
 
-    if (argc != 4) {
-        printf("Usage: %s <IP> <port> <name> \n", argv[0]);
-        exit(EXIT_FAILURE);
-    }
+    // if (argc != 4) {
+    //     printf("Usage: %s <IP> <port> <name> \n", argv[0]);
+    //     exit(EXIT_FAILURE);
+    // }
 
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         ErrorHandling("WSAStartup() error!");
 
-    sprintf(name, argv[3]);
+    sprintf(name, argv[1]);
     hSock = socket(PF_INET, SOCK_STREAM, 0);
 
     memset(&servAdr, 0, sizeof(servAdr));
     servAdr.sin_family = AF_INET;
-    servAdr.sin_addr.s_addr = inet_addr(argv[1]);
-    servAdr.sin_port = htons(atoi(argv[2]));
+    // servAdr.sin_addr.s_addr = inet_addr(argv[1]);
+    servAdr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    // servAdr.sin_port = htons(atoi(argv[2]));
+    servAdr.sin_port = htons(atoi("9999"));
 
     if (connect(hSock, (SOCKADDR *)&servAdr, sizeof(servAdr)) == SOCKET_ERROR)
         ErrorHandling("connect() error");
@@ -107,6 +109,8 @@ unsigned WINAPI RecvMsg(void *arg) // read thread main
             printf("%s ¥‘¿Ã ¡¢º”«œºÃΩ¿¥œ¥Ÿ.\n", recvMessageData.data);
         } else if (recvMessageData.messageType == 2) {
             fputs(recvMessageData.data, stdout);
+        } else if (recvMessageData.messageType == 9) {
+            printf("%s ¥‘¿Ã ≈¿Â«œºÃΩ¿¥œ¥Ÿ.\n", recvMessageData.data);
         }
     }
 }
