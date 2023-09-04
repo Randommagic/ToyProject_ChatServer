@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "map": "cpp",
+        "utility": "cpp",
+        "xtree": "cpp",
+        "stdio.h": "c",
+        "process.h": "c"
+    }
+}

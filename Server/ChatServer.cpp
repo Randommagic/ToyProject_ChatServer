@@ -1,6 +1,6 @@
 /*
     IOCPChatServ_win.c
-    IOCP ë¥¼ ì‚¬ìš©í•œ ì±„íŒ…ì„œë²„
+    IOCP ¸¦ »ç¿ëÇÑ Ã¤ÆÃ¼­¹ö
 
 */
 #include <map>
@@ -39,7 +39,7 @@ typedef struct {
 
 unsigned int WINAPI EchoThreadMain(LPVOID);
 
-void ClientConnected(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
+void ClientConnected(MESSAGE_DATA &sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 
 void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
@@ -70,18 +70,18 @@ int main(int argc, char *argv[]) {
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         ErrorHandling("WSAStartup Error!");
 
-    // IOCPë¥¼ ìœ„í•œ Completion Port ìƒì„±.
+    // IOCP¸¦ À§ÇÑ Completion Port »ı¼º.
     if ((hComPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0)) == NULL) {
         printf("Errorcode : %d \n", WSAGetLastError());
         ErrorHandling("CreateIocompletionPort connecting to socket error");
     }
 
-    // ì½”ì–´ì˜ ìˆ˜ ë§Œí¼ IOë¥¼ ë‹´ë‹¹í•  ì“°ë ˆë“œ ìƒì„±
+    // ÄÚ¾îÀÇ ¼ö ¸¸Å­ IO¸¦ ´ã´çÇÒ ¾²·¹µå »ı¼º
     GetSystemInfo(&sysInfo);
     for (int i = 0; i < sysInfo.dwNumberOfProcessors; i++)
         _beginthreadex(NULL, 0, EchoThreadMain, (LPVOID)hComPort, 0, NULL);
 
-    // WSASocket ì„¤ì •
+    // WSASocket ¼³Á¤
     if ((hServSock = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET)
         ErrorHandling("socket creation error");
     memset(&servAdr, 0, sizeof(servAdr));
@@ -96,7 +96,7 @@ int main(int argc, char *argv[]) {
 
     if (listen(hServSock, 5) == SOCKET_ERROR)
         ErrorHandling("listen error");
-    // ì†Œì¼“ ì„¤ì • ë
+    // ¼ÒÄÏ ¼³Á¤ ³¡
 
     // Mutex init
     hMutex = CreateMutex(NULL, FALSE, NULL);
@@ -108,24 +108,24 @@ int main(int argc, char *argv[]) {
         if ((hClntSock = accept(hServSock, (SOCKADDR *)&clntAdr, &addrLen)) == SOCKET_ERROR)
             ErrorHandling("accept error");
 
-        // í´ë¼ì´ì–¸íŠ¸ì˜ SOCKET í•¸ë“¤ê³¼ adrì„ ì €ì¥í•  handleinfo êµ¬ì¡°ì²´ ë™ì  í• ë‹¹
+        // Å¬¶óÀÌ¾ğÆ®ÀÇ SOCKET ÇÚµé°ú adrÀ» ÀúÀåÇÒ handleinfo ±¸Á¶Ã¼ µ¿Àû ÇÒ´ç
         handleInfo = (LPPER_HANDLE_DATA)malloc(sizeof(PER_HANDLE_DATA));
-        // ì±…ì—ëŠ” ì´ memsetì´ ë¹ ì ¸ ìˆë‹¤..
+        // Ã¥¿¡´Â ÀÌ memsetÀÌ ºüÁ® ÀÖ´Ù..
         memset(handleInfo, 0, sizeof(PER_HANDLE_DATA));
         handleInfo->hClntSock = hClntSock;
         memcpy(&(handleInfo->clntAdr), &clntAdr, addrLen);
 
-        // í´ë¼ì´ì–¸íŠ¸ì˜ ì†Œì¼“ê³¼ ì•ì—ì„œ ìƒì„±í•œ Completion Port ì—°ê²°.
+        // Å¬¶óÀÌ¾ğÆ®ÀÇ ¼ÒÄÏ°ú ¾Õ¿¡¼­ »ı¼ºÇÑ Completion Port ¿¬°á.
         CreateIoCompletionPort((HANDLE)hClntSock, hComPort, (ULONG_PTR)handleInfo, 0);
 
-        // WSARecv í•¨ìˆ˜ í˜¸ì¶œì— í•„ìš”í•œ Overlapperì™€ WSABUF êµ¬ì¡°ì²´ë¥¼ ë‹´ê³ ìˆëŠ” ioInfo êµ¬ì¡°ì²´ ë™ì  í• ë‹¹
+        // WSARecv ÇÔ¼ö È£Ãâ¿¡ ÇÊ¿äÇÑ Overlapper¿Í WSABUF ±¸Á¶Ã¼¸¦ ´ã°íÀÖ´Â ioInfo ±¸Á¶Ã¼ µ¿Àû ÇÒ´ç
         ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
         memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
         ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
         ioInfo->wsaBuf.buf = ioInfo->buffer;
         ioInfo->rwMode = READ;
 
-        // í´ë¼ì´ì–¸íŠ¸ ëª©ë¡ì— ìƒˆë¡œ ì ‘ì†í•œ í´ë¼ì´ì–¸íŠ¸ ì¶”ê°€
+        // Å¬¶óÀÌ¾ğÆ® ¸ñ·Ï¿¡ »õ·Î Á¢¼ÓÇÑ Å¬¶óÀÌ¾ğÆ® Ãß°¡
         WaitForSingleObject(&hMutex, INFINITE);
         clntHandles.insert({hClntSock, handleInfo});
         clntCnt++;
@@ -142,7 +142,7 @@ int main(int argc, char *argv[]) {
     closesocket(hServSock);
 }
 
-// Completion Port Objectì— í• ë‹¹ëœ ì“°ë ˆë“œ
+// Completion Port Object¿¡ ÇÒ´çµÈ ¾²·¹µå
 unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
     HANDLE hComport = (HANDLE)pComport;
@@ -153,7 +153,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
     DWORD flags = 0;
 
     while (1) {
-        // IOê°€ ì™„ë£Œë˜ê³ , ì´ì— ëŒ€í•œ ì •ë³´ê°€ ë“±ë¡ë˜ì—ˆì„ë•Œ ë°˜í™˜.
+        // IO°¡ ¿Ï·áµÇ°í, ÀÌ¿¡ ´ëÇÑ Á¤º¸°¡ µî·ÏµÇ¾úÀ»¶§ ¹İÈ¯.
         BOOL CPstatus = GetQueuedCompletionStatus(hComport, &bytesTrans, (ULONG_PTR *)&handleInfo, (LPOVERLAPPED *)&ioInfo, INFINITE);
         sock = handleInfo->hClntSock;
 
@@ -197,20 +197,18 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
     }
     return 0;
 }
-void ClientConnected(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
-
-    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
-    printf("clientName : %s", handleInfo->clntName);
+void ClientConnected(MESSAGE_DATA &MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
 
     DWORD flags = 0;
     LPPER_IO_DATA ioInfo;
-    MessageData.messageType = 1;
+
+    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
-        // ìê¸° ìì‹ ì—ê²Œ ì ‘ì†í–ˆë‹¤ëŠ” í‘œì‹œë¬¸êµ¬ë¥¼ ë„ìš¸ í•„ìš”ëŠ” ì—†ìœ¼ë‹ˆ
+        // ÀÚ±â ÀÚ½Å¿¡°Ô Á¢¼ÓÇß´Ù´Â Ç¥½Ã¹®±¸¸¦ ¶ç¿ï ÇÊ¿ä´Â ¾øÀ¸´Ï
         if (clntHandle.first == handleInfo->hClntSock)
             continue;
         ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
@@ -223,7 +221,7 @@ void ClientConnected(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA ha
     }
     ReleaseMutex(&hMutex);
 
-    // í´ë¼ì´ì–¸íŠ¸í•œí…Œì„œ ë°›ì„ bufì™€ wsabuf ë“± io_data ê³µê°„ì„ ë¯¸ë¦¬ ë™ì  í• ë‹¹ í•´ë†“ìŒ.
+    // Å¬¶óÀÌ¾ğÆ®ÇÑÅ×¼­ ¹ŞÀ» buf¿Í wsabuf µî io_data °ø°£À» ¹Ì¸® µ¿Àû ÇÒ´ç ÇØ³õÀ½.
     ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
     memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
     ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
@@ -236,11 +234,10 @@ void ClientConnected(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA ha
 }
 
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
-    // ì—°ê²°í•œ ëª¨ë“  í´ë¼ì´ì–¸íŠ¸ì—ê²Œ ë°ì´í„° ì „ì†¡.
-
+    // ¿¬°áÇÑ ¸ğµç Å¬¶óÀÌ¾ğÆ®¿¡°Ô µ¥ÀÌÅÍ Àü¼Û.
     DWORD flags = 0;
     LPPER_IO_DATA ioInfo;
-    sendMessageData.messageType = 9;
+    sendMessageData.messageType = 2;
 
     char temp[BUF_SIZE];
     sprintf(temp, "[%s] : %s", handleInfo->clntName, sendMessageData.data);
@@ -251,7 +248,7 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
-        // socketë§ˆë‹¤ ioinfo overlappedêµ¬ì¡°ì²´ë¥¼ ìƒˆë¡œ ë§Œë“¤ì–´ì•¼ í•¨
+        // socket¸¶´Ù ioinfo overlapped±¸Á¶Ã¼¸¦ »õ·Î ¸¸µé¾î¾ß ÇÔ
         ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
         memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
         memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
@@ -262,7 +259,7 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     }
     ReleaseMutex(&hMutex);
 
-    // í´ë¼ì´ì–¸íŠ¸í•œí…Œì„œ ë°›ì„ bufì™€ wsabuf ë“± io_data ê³µê°„ì„ ë¯¸ë¦¬ ë™ì  í• ë‹¹ í•´ë†“ìŒ.
+    // Å¬¶óÀÌ¾ğÆ®ÇÑÅ×¼­ ¹ŞÀ» buf¿Í wsabuf µî io_data °ø°£À» ¹Ì¸® µ¿Àû ÇÒ´ç ÇØ³õÀ½.
     ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
     memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
     ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
