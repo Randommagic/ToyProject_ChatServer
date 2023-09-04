@@ -85,7 +85,7 @@ unsigned WINAPI SendMsg(void *arg) // send thread main
         }
         SerializeMessage(&sendMessageData, sendMessageBuffer);
         send(hSock, sendMessageBuffer, sizeof(MESSAGE_DATA), 0);
-        }
+    }
 }
 
 unsigned WINAPI RecvMsg(void *arg) // read thread main

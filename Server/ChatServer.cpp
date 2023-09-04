@@ -35,13 +35,12 @@ typedef struct {
     WSABUF wsaBuf;
     char buffer[sizeof(MESSAGE_DATA)];
     int rwMode;
-    int refCnt;
 } PER_IO_DATA, *LPPER_IO_DATA;
 
 unsigned int WINAPI EchoThreadMain(LPVOID);
 
-void sendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
-void sendMessageToAll2(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
+void ClientConnected(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
+void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 
 void ClientDisconnected(SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
 void ErrorHandling(const char *);
@@ -125,8 +124,6 @@ int main(int argc, char *argv[]) {
         ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
         ioInfo->wsaBuf.buf = ioInfo->buffer;
         ioInfo->rwMode = READ;
-        ioInfo->refCnt = 0;
-        printf("Created io struct address : %p\n", ioInfo);
 
         // 클라이언트 목록에 새로 접속한 클라이언트 추가
         WaitForSingleObject(&hMutex, INFINITE);
@@ -181,15 +178,17 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
             char receivedBuffer[sizeof(MESSAGE_DATA)];
             memcpy(receivedBuffer, ioInfo->wsaBuf.buf, sizeof(MESSAGE_DATA));
-            // printf("Received io struct address : %p\n", ioInfo);
             free(ioInfo);
 
             MESSAGE_DATA receivedMessage;
             DeserializeMessage(receivedBuffer, &receivedMessage);
-            printf("Received data size : %d\n", bytesTrans);
-            printf("Received Message : %s\n", receivedMessage.data);
 
-            sendMessageToAll2(receivedMessage, sock, handleInfo);
+            if (receivedMessage.messageType == 1) {
+                ClientConnected(receivedMessage, sock, handleInfo);
+            } else {
+                SendMessageToAll(receivedMessage, sock, handleInfo);
+            }
+
         } else {
             printf("Message sent to %d clients! \n", clntCnt);
             // printf("Deleted io struct address : %p\n", ioInfo);
@@ -198,27 +197,28 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
     }
     return 0;
 }
+void ClientConnected(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
 
-void sendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
-    // 연결한 모든 클라이언트에게 데이터 전송.
+    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
+    printf("clientName : %s", handleInfo->clntName);
 
     DWORD flags = 0;
-    sendMessageData.messageType = 9;
-
+    LPPER_IO_DATA ioInfo;
+    MessageData.messageType = 1;
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
-    SerializeMessage(&sendMessageData, sendMessageBuffer);
-
-    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    // 이건지 밑에껀지 모르겠다.
-    // ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
-    ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-
-    ioInfo->rwMode = WRITE;
-    memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+    SerializeMessage(&MessageData, sendMessageBuffer);
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
-        (ioInfo->refCnt)++;
+        // 자기 자신에게 접속했다는 표시문구를 띄울 필요는 없으니
+        if (clntHandle.first == handleInfo->hClntSock)
+            continue;
+        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        ioInfo->wsaBuf.buf = ioInfo->buffer;
+        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        ioInfo->rwMode = WRITE;
         WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
     ReleaseMutex(&hMutex);
@@ -229,35 +229,38 @@ void sendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
     ioInfo->wsaBuf.buf = ioInfo->buffer;
     ioInfo->rwMode = READ;
-    ioInfo->refCnt = 0;
 
     // printf("Created io struct address : %p\n", ioInfo);
 
     WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
 }
 
-void sendMessageToAll2(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
+void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
     // 연결한 모든 클라이언트에게 데이터 전송.
 
     DWORD flags = 0;
     LPPER_IO_DATA ioInfo;
     sendMessageData.messageType = 9;
 
+    char temp[BUF_SIZE];
+    sprintf(temp, "[%s] : %s", handleInfo->clntName, sendMessageData.data);
+    memcpy(sendMessageData.data, temp, BUF_SIZE);
+
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&sendMessageData, sendMessageBuffer);
 
-    // WaitForSingleObject(&hMutex, INFINITE);
-    // for (auto &clntHandle : clntHandles) {
-    //     // socket마다 ioinfo overlapped구조체를 새로 만들어야 함
-    //     ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-    //     memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    //     memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-    //     ioInfo->wsaBuf.buf = ioInfo->buffer;
-    //     ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-    //     ioInfo->rwMode = WRITE;
-    //     WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
-    // }
-    // ReleaseMutex(&hMutex);
+    WaitForSingleObject(&hMutex, INFINITE);
+    for (auto &clntHandle : clntHandles) {
+        // socket마다 ioinfo overlapped구조체를 새로 만들어야 함
+        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        ioInfo->wsaBuf.buf = ioInfo->buffer;
+        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        ioInfo->rwMode = WRITE;
+        WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+    }
+    ReleaseMutex(&hMutex);
 
     // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
     ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
@@ -265,7 +268,6 @@ void sendMessageToAll2(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_D
     ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
     ioInfo->wsaBuf.buf = ioInfo->buffer;
     ioInfo->rwMode = READ;
-    ioInfo->refCnt = 0;
 
     // printf("Created io struct address : %p\n", ioInfo);
 
