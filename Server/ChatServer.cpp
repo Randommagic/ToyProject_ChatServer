@@ -1,6 +1,6 @@
 /*
     현재 문제 : soft close시에는 write에 대한 응답을 못 받는 듯 하다.
-
+    sendtoclient때 문제가 있다 ->클라 종료시 이름 뒤에 뭔가 더 붙여서 출력된다.
 */
 #include <map>
 #include <process.h>
@@ -43,11 +43,14 @@ void ClientChangeName(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo);
 
 void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo);
-void ErrorHandling(const char *);
 
 void SerializeMessage(MESSAGE_DATA *message, char *buffer);
 void DeserializeMessage(char *buffer, MESSAGE_DATA *message);
 
+void SendToClient(SOCKET sock, char *messageBuffer);
+void ReceiveFromClient(SOCKET sock);
+
+void ErrorHandling(const char *);
 std::map<SOCKET, LPPER_HANDLE_DATA> clntHandles;
 
 int clntCnt = 0;
@@ -65,7 +68,7 @@ int main(int argc, char *argv[]) {
 
     SOCKET hServSock;
     SOCKADDR_IN servAdr;
-    DWORD recvBytes, flags = 0;
+    DWORD flags = 0;
 
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         ErrorHandling("WSAStartup Error!");
@@ -119,24 +122,15 @@ int main(int argc, char *argv[]) {
         // 클라이언트의 소켓과 앞에서 생성한 Completion Port 연결.
         CreateIoCompletionPort((HANDLE)hClntSock, hComPort, (ULONG_PTR)handleInfo, 0);
 
-        // WSARecv 함수 호출에 필요한 Overlapper와 WSABUF 구조체를 담고있는 ioInfo 구조체 동적 할당
-        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
-        ioInfo->wsaBuf.buf = ioInfo->buffer;
-        ioInfo->rwMode = READ;
-
         // 클라이언트 목록에 새로 접속한 클라이언트 추가
         WaitForSingleObject(&hMutex, INFINITE);
         clntHandles.insert({hClntSock, handleInfo});
         clntCnt++;
-        // printf("New Client joined. Current map size : %d \n", clntHandles.size());
-        // clntHandles[clntCnt++] = handleInfo;
         ReleaseMutex(&hMutex);
 
         printf("Connected Client IP : %s \n", inet_ntoa(handleInfo->clntAdr.sin_addr));
 
-        WSARecv(handleInfo->hClntSock, &(ioInfo->wsaBuf), 1, &recvBytes, &flags, &(ioInfo->overlapped), NULL);
+        ReceiveFromClient(handleInfo->hClntSock);
     }
 
     CloseHandle(hMutex);
@@ -185,7 +179,9 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
 
             MESSAGE_DATA receivedMessage;
             DeserializeMessage(receivedBuffer, &receivedMessage);
-            printf("type : %d\n", receivedMessage.messageType);
+            // printf("type : %d\n", receivedMessage.messageType);
+
+            // 클라이언트로부터 수신받은 메세지 type에 따라서 처리
             if (receivedMessage.messageType == 1) {
                 ClientConnected(receivedMessage, sock, handleInfo);
             } else if (receivedMessage.messageType == 2) {
@@ -194,8 +190,7 @@ unsigned int WINAPI EchoThreadMain(LPVOID pComport) {
                 ClientChangeName(receivedMessage, sock, handleInfo);
             }
         } else {
-            printf("Message sent to %d clients! \n", clntCnt);
-            // printf("Deleted io struct address : %p\n", ioInfo);
+            // printf("Message sent to %d clients! \n", clntCnt);
             free(ioInfo);
         }
     }
@@ -215,24 +210,19 @@ void ClientConnected(MESSAGE_DATA &MessageData, SOCKET sock, LPPER_HANDLE_DATA h
         // 자기 자신에게 접속했다는 표시문구를 띄울 필요는 없으니
         if (clntHandle.first == handleInfo->hClntSock)
             continue;
-        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        ioInfo->wsaBuf.buf = ioInfo->buffer;
-        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        ioInfo->rwMode = WRITE;
-        WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+
+        SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
+        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        // ioInfo->wsaBuf.buf = ioInfo->buffer;
+        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        // ioInfo->rwMode = WRITE;
+        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
     ReleaseMutex(&hMutex);
 
-    // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
-    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
-    ioInfo->wsaBuf.buf = ioInfo->buffer;
-    ioInfo->rwMode = READ;
-
-    WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
+    ReceiveFromClient(sock);
 }
 
 void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
@@ -250,35 +240,24 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
-        // socket마다 ioinfo overlapped구조체를 새로 만들어야 함
-        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        ioInfo->wsaBuf.buf = ioInfo->buffer;
-        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        ioInfo->rwMode = WRITE;
-        WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+        SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
+
+        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        // ioInfo->wsaBuf.buf = ioInfo->buffer;
+        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        // ioInfo->rwMode = WRITE;
+        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
     ReleaseMutex(&hMutex);
 
-    // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
-    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
-    ioInfo->wsaBuf.buf = ioInfo->buffer;
-    ioInfo->rwMode = READ;
-
-    // printf("Created io struct address : %p\n", ioInfo);
-
-    WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
+    ReceiveFromClient(sock);
 }
 
 // 문제 있음.
 void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
-
-    DWORD flags = 0;
     LPPER_IO_DATA ioInfo;
-
     MessageData.messageType = 3;
     memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
@@ -286,24 +265,20 @@ void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA h
 
     WaitForSingleObject(&hMutex, INFINITE);
     for (auto &clntHandle : clntHandles) {
-        ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        ioInfo->wsaBuf.buf = ioInfo->buffer;
-        ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        ioInfo->rwMode = WRITE;
-        WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+
+        SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
+
+        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
+        // ioInfo->wsaBuf.buf = ioInfo->buffer;
+        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
+        // ioInfo->rwMode = WRITE;
+        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
     ReleaseMutex(&hMutex);
 
-    // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
-    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
-    ioInfo->wsaBuf.buf = ioInfo->buffer;
-    ioInfo->rwMode = READ;
-
-    WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
+    ReceiveFromClient(sock);
 }
 
 void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
@@ -313,7 +288,7 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
     LPPER_IO_DATA newIoInfo;
 
     messageData.messageType = 9;
-    memcpy(messageData.data, handleInfo->clntName, strlen(messageData.data));
+    memcpy(messageData.data, handleInfo->clntName, strlen(handleInfo->clntName));
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&messageData, sendMessageBuffer);
 
@@ -322,13 +297,8 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
         // 당연히 접속 끊은 사람은 제외하고 보내기
         if (clntHandle.first == handleInfo->hClntSock)
             continue;
-        newIoInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        memset(&(newIoInfo->overlapped), 0, sizeof(OVERLAPPED));
-        memcpy(newIoInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        newIoInfo->wsaBuf.buf = newIoInfo->buffer;
-        newIoInfo->wsaBuf.len = sizeof(newIoInfo->buffer);
-        newIoInfo->rwMode = WRITE;
-        WSASend(clntHandle.second->hClntSock, &(newIoInfo->wsaBuf), 1, NULL, 0, &(newIoInfo->overlapped), NULL);
+
+        SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
     }
     clntHandles.erase(handleInfo->hClntSock);
     clntCnt--;
@@ -342,6 +312,32 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
 void SerializeMessage(MESSAGE_DATA *message, char *buffer) { memcpy(buffer, message, sizeof(MESSAGE_DATA)); }
 
 void DeserializeMessage(char *buffer, MESSAGE_DATA *message) { memcpy(message, buffer, sizeof(MESSAGE_DATA)); }
+
+void ReceiveFromClient(SOCKET sock) {
+    LPPER_IO_DATA ioInfo;
+    DWORD flags = 0;
+
+    // 클라이언트한테서 받을 buf와 wsabuf 등 io_data 공간을 미리 동적 할당 해놓음.
+    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
+    ioInfo->wsaBuf.buf = ioInfo->buffer;
+    ioInfo->rwMode = READ;
+
+    WSARecv(sock, &(ioInfo->wsaBuf), 1, NULL, &flags, &(ioInfo->overlapped), NULL);
+}
+
+void SendToClient(SOCKET sock, char *messageBuffer) {
+    LPPER_IO_DATA ioInfo;
+    // socket마다 ioinfo overlapped구조체를 새로 만들어야 함
+    ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+    memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
+    memcpy(ioInfo->buffer, messageBuffer, sizeof(MESSAGE_DATA));
+    ioInfo->wsaBuf.buf = ioInfo->buffer;
+    ioInfo->wsaBuf.len = sizeof(MESSAGE_DATA);
+    ioInfo->rwMode = WRITE;
+    WSASend(sock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
+}
 
 void ErrorHandling(const char *msg) {
     fputs(msg, stderr);
