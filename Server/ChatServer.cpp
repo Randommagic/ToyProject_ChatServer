@@ -201,7 +201,9 @@ void ClientConnected(MESSAGE_DATA &MessageData, SOCKET sock, LPPER_HANDLE_DATA h
     DWORD flags = 0;
     LPPER_IO_DATA ioInfo;
 
-    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
+    memcpy(handleInfo->clntName, MessageData.data, NAME_SIZE);
+    // memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
+
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
@@ -259,7 +261,7 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
 void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
     LPPER_IO_DATA ioInfo;
     MessageData.messageType = 3;
-    memcpy(handleInfo->clntName, MessageData.data, strlen(MessageData.data));
+    memcpy(handleInfo->clntName, MessageData.data, NAME_SIZE);
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
@@ -288,7 +290,9 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
     LPPER_IO_DATA newIoInfo;
 
     messageData.messageType = 9;
-    memcpy(messageData.data, handleInfo->clntName, strlen(handleInfo->clntName));
+    memcpy(messageData.data, handleInfo->clntName, NAME_SIZE);
+    printf("String : %s , size : %d\n", messageData.data, strlen(messageData.data));
+
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&messageData, sendMessageBuffer);
 

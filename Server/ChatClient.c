@@ -20,7 +20,7 @@ void SerializeMessage(MESSAGE_DATA *message, char *buffer);
 void DeserializeMessage(char *buffer, MESSAGE_DATA *message);
 void ErrorHandling(char *msg);
 
-char name[NAME_SIZE] = "[DEFAULT]";
+char name[NAME_SIZE];
 
 int main(int argc, char *argv[]) {
     WSADATA wsaData;
@@ -28,15 +28,11 @@ int main(int argc, char *argv[]) {
     SOCKADDR_IN servAdr;
     HANDLE hSndThread, hRcvThread;
 
-    // if (argc != 4) {
-    //     printf("Usage: %s <IP> <port> <name> \n", argv[0]);
-    //     exit(EXIT_FAILURE);
-    // }
-
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         ErrorHandling("WSAStartup() error!");
 
     sprintf(name, argv[1]);
+
     hSock = socket(PF_INET, SOCK_STREAM, 0);
 
     memset(&servAdr, 0, sizeof(servAdr));
@@ -49,12 +45,10 @@ int main(int argc, char *argv[]) {
     if (connect(hSock, (SOCKADDR *)&servAdr, sizeof(servAdr)) == SOCKET_ERROR)
         ErrorHandling("connect() error");
 
-    // Îß? Ï≤òÏùå Î≥¥ÎÇº Î©îÏÑ∏Ïß? Ï§?Îπ? - ?ù¥Î¶? ?†ïÎ≥?
     MESSAGE_DATA initSendMessageData;
     memset(&initSendMessageData, 0, sizeof(MESSAGE_DATA));
     initSendMessageData.messageType = 1;
-    memcpy(initSendMessageData.data, name, sizeof(name));
-    initSendMessageData.data[sizeof(name)] = 0;
+    memcpy(initSendMessageData.data, name, strlen(name));
 
     char initSendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&initSendMessageData, initSendMessageBuffer);
