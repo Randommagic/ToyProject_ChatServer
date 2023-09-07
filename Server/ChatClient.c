@@ -125,7 +125,7 @@ unsigned WINAPI RecvMsg(void *arg) // read thread main
         } else if (recvMessageData.messageType == 2) {
             fputs(recvMessageData.data, stdout);
         } else if (recvMessageData.messageType == 3) { // 이름 변경
-            printf("%s 으로 이름을 변경하셨습니다.\n", recvMessageData.data);
+            printf("%s\n", recvMessageData.data);
         } else if (recvMessageData.messageType == 9) {
             printf("%s 님이 퇴장하셨습니다.\n", recvMessageData.data);
         }

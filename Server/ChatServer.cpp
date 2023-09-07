@@ -257,27 +257,24 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     ReceiveFromClient(sock);
 }
 
-// 문제 있음.
 void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA handleInfo) {
     LPPER_IO_DATA ioInfo;
     MessageData.messageType = 3;
+
+    char prevName[NAME_SIZE];
+    memcpy(prevName, handleInfo->clntName, NAME_SIZE);
     memcpy(handleInfo->clntName, MessageData.data, NAME_SIZE);
+
+    memset(MessageData.data, 0, BUF_SIZE);
+    sprintf(MessageData.data, "%s -> %s", prevName, handleInfo->clntName);
+
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
     WaitForSingleObject(&hMutex, INFINITE);
-    for (auto &clntHandle : clntHandles) {
-
+    for (auto &clntHandle : clntHandles)
         SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
 
-        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        // ioInfo->wsaBuf.buf = ioInfo->buffer;
-        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        // ioInfo->rwMode = WRITE;
-        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
-    }
     ReleaseMutex(&hMutex);
 
     ReceiveFromClient(sock);
@@ -291,7 +288,6 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
 
     messageData.messageType = 9;
     memcpy(messageData.data, handleInfo->clntName, NAME_SIZE);
-    printf("String : %s , size : %d\n", messageData.data, strlen(messageData.data));
 
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&messageData, sendMessageBuffer);
