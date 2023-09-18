@@ -1,14 +1,17 @@
 /*
-    현재 문제 : soft close시에는 write에 대한 응답을 못 받는 듯 하다.
-    sendtoclient때 문제가 있다 ->클라 종료시 이름 뒤에 뭔가 더 붙여서 출력된다.
+    현재 문제 : soft close시에는 write에 대한 응답을 못 받는 듯 하다??
 */
-#include <map>
+#include <winsock2.h>
+//
 #include <process.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include <winerror.h>
-#include <winsock2.h>
+
+//
+#include <map>
+#include <mutex>
 //
 
 #define MAX_CLNT 256
@@ -55,6 +58,8 @@ std::map<SOCKET, LPPER_HANDLE_DATA> clntHandles;
 
 int clntCnt = 0;
 HANDLE hMutex;
+
+std::mutex newMutex;
 
 int main(int argc, char *argv[]) {
     // if (argc != 2)
@@ -123,10 +128,13 @@ int main(int argc, char *argv[]) {
         CreateIoCompletionPort((HANDLE)hClntSock, hComPort, (ULONG_PTR)handleInfo, 0);
 
         // 클라이언트 목록에 새로 접속한 클라이언트 추가
-        WaitForSingleObject(&hMutex, INFINITE);
+        // WaitForSingleObject(&hMutex, INFINITE);
+        newMutex.lock();
         clntHandles.insert({hClntSock, handleInfo});
         clntCnt++;
-        ReleaseMutex(&hMutex);
+        newMutex.unlock();
+
+        // ReleaseMutex(&hMutex);
 
         printf("Connected Client IP : %s \n", inet_ntoa(handleInfo->clntAdr.sin_addr));
 
@@ -207,22 +215,18 @@ void ClientConnected(MESSAGE_DATA &MessageData, SOCKET sock, LPPER_HANDLE_DATA h
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
-    WaitForSingleObject(&hMutex, INFINITE);
+    // WaitForSingleObject(&hMutex, INFINITE);
+    newMutex.lock();
+
     for (auto &clntHandle : clntHandles) {
         // 자기 자신에게 접속했다는 표시문구를 띄울 필요는 없으니
         if (clntHandle.first == handleInfo->hClntSock)
             continue;
 
         SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
-        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        // ioInfo->wsaBuf.buf = ioInfo->buffer;
-        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        // ioInfo->rwMode = WRITE;
-        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
-    ReleaseMutex(&hMutex);
+    // ReleaseMutex(&hMutex);
+    newMutex.unlock();
 
     ReceiveFromClient(sock);
 }
@@ -240,19 +244,14 @@ void SendMessageToAll(MESSAGE_DATA sendMessageData, SOCKET sock, LPPER_HANDLE_DA
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&sendMessageData, sendMessageBuffer);
 
-    WaitForSingleObject(&hMutex, INFINITE);
+    // WaitForSingleObject(&hMutex, INFINITE);
+    newMutex.lock();
+
     for (auto &clntHandle : clntHandles) {
         SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
-
-        // ioInfo = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
-        // memset(&(ioInfo->overlapped), 0, sizeof(OVERLAPPED));
-        // memcpy(ioInfo->buffer, sendMessageBuffer, sizeof(MESSAGE_DATA));
-        // ioInfo->wsaBuf.buf = ioInfo->buffer;
-        // ioInfo->wsaBuf.len = sizeof(ioInfo->buffer);
-        // ioInfo->rwMode = WRITE;
-        // WSASend(clntHandle.second->hClntSock, &(ioInfo->wsaBuf), 1, NULL, 0, &(ioInfo->overlapped), NULL);
     }
-    ReleaseMutex(&hMutex);
+    // ReleaseMutex(&hMutex);
+    newMutex.unlock();
 
     ReceiveFromClient(sock);
 }
@@ -271,11 +270,14 @@ void ClientChangeName(MESSAGE_DATA MessageData, SOCKET sock, LPPER_HANDLE_DATA h
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&MessageData, sendMessageBuffer);
 
-    WaitForSingleObject(&hMutex, INFINITE);
+    // WaitForSingleObject(&hMutex, INFINITE);
+    newMutex.lock();
+
     for (auto &clntHandle : clntHandles)
         SendToClient(clntHandle.second->hClntSock, sendMessageBuffer);
 
-    ReleaseMutex(&hMutex);
+    // ReleaseMutex(&hMutex);
+    newMutex.unlock();
 
     ReceiveFromClient(sock);
 }
@@ -292,7 +294,9 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
     char sendMessageBuffer[sizeof(MESSAGE_DATA)];
     SerializeMessage(&messageData, sendMessageBuffer);
 
-    WaitForSingleObject(&hMutex, INFINITE);
+    // WaitForSingleObject(&hMutex, INFINITE);
+    newMutex.lock();
+
     for (auto &clntHandle : clntHandles) {
         // 당연히 접속 끊은 사람은 제외하고 보내기
         if (clntHandle.first == handleInfo->hClntSock)
@@ -302,7 +306,8 @@ void ClientDisconnected(LPPER_HANDLE_DATA handleInfo, LPPER_IO_DATA ioInfo) {
     }
     clntHandles.erase(handleInfo->hClntSock);
     clntCnt--;
-    ReleaseMutex(&hMutex);
+    // ReleaseMutex(&hMutex);
+    newMutex.unlock();
 
     closesocket(handleInfo->hClntSock);
     free(handleInfo);
